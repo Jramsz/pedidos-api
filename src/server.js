@@ -7,7 +7,6 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const ESTADOS = ['pendiente', 'pagado', 'enviado', 'entregado', 'cancelado'];
 
-app.disable('x-powered-by');
 app.set('trust proxy', true);
 app.use(express.json({ limit: '50kb' }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -49,7 +48,6 @@ function validarPedido(b, parcial = false) {
   return errores;
 }
 
-// ---------------------------------------------------------------- salud
 app.get('/health', envolver(async (req, res) => {
   await pool.query('SELECT 1');
   res.json({ estado: 'ok', pod: os.hostname() });
@@ -64,7 +62,6 @@ app.get('/api', (req, res) => {
   });
 });
 
-// ---------------------------------------------------------------- clientes
 app.get('/api/clientes', envolver(async (req, res) => {
   const { rows } = await pool.query(`
     SELECT c.*, count(p.id)::int AS pedidos
@@ -119,7 +116,6 @@ app.delete('/api/clientes/:id', envolver(async (req, res) => {
   res.status(204).end();
 }));
 
-// ---------------------------------------------------------------- pedidos
 app.get('/api/pedidos', envolver(async (req, res) => {
   const estado = req.query.estado;
   if (estado && !ESTADOS.includes(estado)) return res.status(400).json({ error: 'estado inválido' });
@@ -201,7 +197,6 @@ app.get('/api/resumen', envolver(async (req, res) => {
   res.json({ ...totales.rows[0], por_estado: porEstado.rows, pod: os.hostname() });
 }));
 
-// ---------------------------------------------------------------- errores
 app.use('/api', (req, res) => res.status(404).json({ error: 'ruta no encontrada' }));
 
 app.use((err, req, res, next) => {
@@ -212,7 +207,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'error interno' });
 });
 
-// ---------------------------------------------------------------- arranque
 async function iniciar() {
   await esperarBase();
   await migrar();
