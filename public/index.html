@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pedidos · API REST</title>
+<style>
+  :root { --fondo:#f5f3ff; --tarjeta:#fff; --texto:#1e1b4b; --suave:#6b7280; --borde:#e5e7eb; --acento:#4f46e5; --peligro:#b91c1c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--fondo); color:var(--texto); }
+  header { background:#1e1b4b; color:#fff; padding:14px 24px; display:flex; justify-content:space-between; align-items:center; }
+  header small { color:#c7d2fe; }
+  main { max-width:1080px; margin:24px auto; padding:0 16px; }
+  .resumen { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
+  .resumen div, .tarjeta { background:var(--tarjeta); border:1px solid var(--borde); border-radius:8px; padding:14px; }
+  .tarjeta { padding:20px; margin-bottom:16px; }
+  .resumen b { display:block; font-size:22px; }
+  .resumen span { color:var(--suave); font-size:13px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--borde); font-size:14px; }
+  th { color:var(--suave); }
+  td.num, th.num { text-align:right; }
+  form { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; align-items:end; }
+  label { font-size:13px; font-weight:600; display:block; margin-bottom:4px; }
+  input, select, button { width:100%; padding:8px; border:1px solid var(--borde); border-radius:6px; font:inherit; }
+  button { background:var(--acento); color:#fff; border-color:var(--acento); cursor:pointer; }
+  button.secundario { background:#fff; color:var(--texto); border-color:var(--borde); width:auto; padding:4px 10px; }
+  button.peligro { background:#fff; color:var(--peligro); border-color:var(--peligro); width:auto; padding:4px 10px; }
+  .estado { font-size:12px; padding:2px 8px; border-radius:10px; background:#eef2ff; }
+  .mensaje { min-height:20px; font-size:13px; margin-top:8px; }
+  code { background:#eef2ff; padding:1px 5px; border-radius:4px; }
+  footer { text-align:center; color:var(--suave); font-size:12px; padding:24px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Pedidos</strong>
+  <small id="info">Node.js · Express · PostgreSQL</small>
+</header>
+<main>
+  <div class="resumen">
+    <div><b id="r-clientes">–</b><span>clientes</span></div>
+    <div><b id="r-pedidos">–</b><span>pedidos</span></div>
+    <div><b id="r-facturado">–</b><span>facturado</span></div>
+    <div><b id="r-pendientes">–</b><span>pendientes</span></div>
+  </div>
+
+  <div class="tarjeta">
+    <h3 style="margin-top:0">Nuevo pedido</h3>
+    <form id="form-pedido">
+      <div><label for="cliente">Cliente</label><select id="cliente" required></select></div>
+      <div><label for="producto">Producto</label><input id="producto" required maxlength="120"></div>
+      <div><label for="cantidad">Cantidad</label><input id="cantidad" type="number" min="1" value="1" required></div>
+      <div><label for="precio">Precio unitario</label><input id="precio" type="number" min="0" step="0.01" required></div>
+      <div><button type="submit">Crear pedido</button></div>
+    </form>
+    <div class="mensaje" id="msg"></div>
+  </div>
+
+  <div class="tarjeta">
+    <h3 style="margin-top:0">Últimos pedidos</h3>
+    <table>
+      <thead><tr><th>#</th><th>Cliente</th><th>Producto</th><th class="num">Cant.</th><th class="num">Total</th><th>Estado</th><th></th></tr></thead>
+      <tbody id="tabla"></tbody>
+    </table>
+  </div>
+
+  <div class="tarjeta">
+    <h3 style="margin-top:0">API REST</h3>
+    <p><code>GET|POST /api/clientes</code> · <code>GET|PUT|DELETE /api/clientes/:id</code></p>
+    <p><code>GET|POST /api/pedidos</code> · <code>GET|PUT|DELETE /api/pedidos/:id</code> · <code>GET /api/resumen</code> · <code>GET /health</code></p>
+  </div>
+</main>
+<footer>PaaS multi-tenant · inquilino tenant-beta</footer>
+
+<script>
+const ESTADOS = ['pendiente', 'pagado', 'enviado', 'entregado', 'cancelado'];
+const $ = (id) => document.getElementById(id);
+const dinero = (v) => '$' + Number(v).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const escapar = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function api(ruta, opciones = {}) {
+  const r = await fetch(ruta, { headers: { 'Content-Type': 'application/json' }, ...opciones });
+  if (r.status === 204) return null;
+  const datos = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(datos.error || (datos.errores || []).join('; ') || `HTTP ${r.status}`);
+  return datos;
+}
+
+async function cargar() {
+  const [resumen, pedidos, clientes] = await Promise.all([api('/api/resumen'), api('/api/pedidos?limite=20'), api('/api/clientes')]);
+  $('r-clientes').textContent = resumen.clientes;
+  $('r-pedidos').textContent = resumen.pedidos;
+  $('r-facturado').textContent = dinero(resumen.facturado);
+  $('r-pendientes').textContent = (resumen.por_estado.find((e) => e.estado === 'pendiente') || { cantidad: 0 }).cantidad;
+  $('info').textContent = `Node.js · Express · PostgreSQL · pod ${resumen.pod}`;
+  $('cliente').innerHTML = clientes.map((c) => `<option value="${c.id}">${escapar(c.nombre)}</option>`).join('');
+  $('tabla').innerHTML = pedidos.map((p) => `
+    <tr>
+      <td>${p.id}</td><td>${escapar(p.cliente)}</td><td>${escapar(p.producto)}</td>
+      <td class="num">${p.cantidad}</td><td class="num">${dinero(p.total)}</td>
+      <td><select data-id="${p.id}" class="cambiar-estado">${ESTADOS.map((e) => `<option ${e === p.estado ? 'selected' : ''}>${e}</option>`).join('')}</select></td>
+      <td><button class="peligro" data-borrar="${p.id}">Eliminar</button></td>
+    </tr>`).join('');
+}
+
+$('form-pedido').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  try {
+    await api('/api/pedidos', { method: 'POST', body: JSON.stringify({
+      cliente_id: Number($('cliente').value), producto: $('producto').value,
+      cantidad: Number($('cantidad').value), precio_unitario: Number($('precio').value),
+    }) });
+    $('msg').textContent = 'Pedido creado.';
+    ev.target.reset();
+    await cargar();
+  } catch (e) { $('msg').textContent = 'Error: ' + e.message; }
+});
+
+$('tabla').addEventListener('change', async (ev) => {
+  if (!ev.target.classList.contains('cambiar-estado')) return;
+  try { await api(`/api/pedidos/${ev.target.dataset.id}`, { method: 'PUT', body: JSON.stringify({ estado: ev.target.value }) }); await cargar(); }
+  catch (e) { $('msg').textContent = 'Error: ' + e.message; }
+});
+
+$('tabla').addEventListener('click', async (ev) => {
+  const id = ev.target.dataset.borrar;
+  if (!id || !confirm(`¿Eliminar el pedido ${id}?`)) return;
+  try { await api(`/api/pedidos/${id}`, { method: 'DELETE' }); await cargar(); }
+  catch (e) { $('msg').textContent = 'Error: ' + e.message; }
+});
+
+cargar().catch((e) => { $('msg').textContent = 'No se pudo cargar la API: ' + e.message; });
+</script>
+</body>
+</html>

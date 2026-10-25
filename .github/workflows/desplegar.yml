@@ -1,0 +1,52 @@
+name: Desplegar en el PaaS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: despliegue-pedidos
+  cancel-in-progress: false
+
+jobs:
+  desplegar:
+    name: Construir y desplegar pedidos en tenant-beta
+    runs-on: [self-hosted, paas]
+    timeout-minutes: 25
+    env:
+      TENANT: tenant-beta
+      APP: pedidos
+      HOST: pedidos.paas.local
+      SALUD: /health
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Construir la imagen desde el Dockerfile y desplegar con el CLI del PaaS
+        run: |
+          export PAAS_TAG="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
+          "$HOME/paas-lab/fase2-helm/paas-deploy.sh" "$TENANT" paas/values.yaml --build .
+
+      - name: Comprobar el despliegue
+        run: |
+          kubectl -n "$TENANT" rollout status "deploy/$APP" --timeout=180s
+          kubectl -n "$TENANT" get pods -l "app.kubernetes.io/name=$APP" -o wide
+          echo "Imagen en ejecución: $(kubectl -n "$TENANT" get deploy "$APP" -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          URL="http://$(minikube ip)$SALUD"
+          for intento in $(seq 1 12); do
+            codigo=$(curl -s -o /tmp/salud-$APP.txt -w '%{http_code}' -m 10 -H "Host: $HOST" "$URL" || true)
+            echo "Intento $intento: http://$HOST$SALUD respondió HTTP $codigo"
+            [ "$codigo" = "200" ] && exit 0
+            sleep 5
+          done
+          head -c 600 /tmp/salud-$APP.txt; echo
+          kubectl -n "$TENANT" logs "deploy/$APP" --tail=40
+          exit 1
+
+      - name: Limpiar imágenes antiguas (conserva las 3 últimas)
+        if: success()
+        run: |
+          minikube image ls | grep "paas/tenant-beta-pedidos:" | sed 's#^docker.io/##' \
+            | awk -F- '{print $NF, $0}' | sort -n | cut -d' ' -f2- \
+            | head -n -3 | xargs -r -n1 minikube image rm || true
